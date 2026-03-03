@@ -46,12 +46,13 @@ def _upsert_companies(db: Session, companies: list[dict]) -> tuple[int, int]:
             continue
 
         try:
+            sp = db.begin_nested()  # savepoint so failure doesn't nuke batch
             company = Company(**data)
             db.add(company)
             db.flush()
             new_count += 1
         except Exception:
-            db.rollback()
+            sp.rollback()
             skip_count += 1
 
     db.commit()

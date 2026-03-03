@@ -1,11 +1,40 @@
+"""a16z Speedrun scraper — uses public REST API directly."""
+
 import logging
+from urllib.parse import urlencode
 
 from app.scrapers.base import BaseScraper
-from app.scrapers.consumer_filter import is_consumer_company
 
 logger = logging.getLogger(__name__)
 
-A16Z_URL = "https://speedrun.a16z.com"
+API_URL = "https://speedrun-be.a16z.com/api/companies/companies/"
+
+# Industry tags from a16z that are consumer-facing
+CONSUMER_INDUSTRIES = {
+    "dating",
+    "fitness",
+    "games studio",
+    "social networking",
+    "ugc",
+    "real money gaming",
+    "media/animation",
+    "marketplace",
+    "edtech",
+    "publishing",
+    "ar/vr",
+    "creative tools",
+    "advertising/marketing",
+}
+
+# Industries that are clearly NOT consumer
+B2B_INDUSTRIES = {
+    "b2b",
+    "defense tech",
+    "developer tools",
+    "ai models/infrastructure",
+    "robotics",
+    "deep tech",
+}
 
 
 class A16ZScraper(BaseScraper):
@@ -14,122 +43,84 @@ class A16ZScraper(BaseScraper):
     async def scrape(self) -> list[dict]:
         pw, browser, context, page = await self._launch_browser()
         companies = []
-        errors = []
         skipped = 0
 
         try:
-            await self._safe_goto(page, A16Z_URL)
-            await page.wait_for_timeout(3000)
+            # Fetch all companies via the public API
+            params = urlencode({"limit": 200, "offset": 0, "ordering": "name"})
+            url = f"{API_URL}?{params}"
+            await self._safe_goto(page, url)
+            await page.wait_for_timeout(2000)
 
-            for _ in range(20):
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(800)
+            # Parse JSON response from the page
+            import json
+            body = await page.inner_text("body")
+            data = json.loads(body)
+            results = data.get("results", [])
+            logger.info(f"a16z API: Got {len(results)} companies")
 
-            # Try multiple selector strategies
-            cards = await page.query_selector_all(
-                "[class*='company'], [class*='portfolio'], [class*='card']"
-            )
-            if not cards:
-                cards = await page.query_selector_all("article, .grid > div, li")
+            for co in results:
+                name = co.get("name", "").strip()
+                if not name:
+                    continue
 
-            logger.info(f"a16z: Found {len(cards)} potential elements")
+                industries = [i.lower() for i in co.get("industries", [])]
 
-            links = await page.query_selector_all("a[href]")
-            seen_names = set()
+                # Filter: keep consumer-oriented companies, skip clear B2B
+                is_consumer = any(i in CONSUMER_INDUSTRIES for i in industries)
+                is_b2b = any(i in B2B_INDUSTRIES for i in industries)
 
-            for link in links:
-                try:
-                    href = await link.get_attribute("href") or ""
-                    text = (await link.inner_text()).strip()
+                # For ambiguous ones (AI, Fintech, Healthcare, Web3) check
+                # if they also have a consumer tag or lean consumer
+                if not is_consumer and is_b2b:
+                    skipped += 1
+                    continue
 
-                    if not text or len(text) > 200 or len(text) < 2:
+                if not is_consumer and not is_b2b:
+                    # Ambiguous — check description for consumer signals
+                    from app.scrapers.consumer_filter import is_consumer_company
+                    desc = co.get("preamble", "") or co.get("description", "")
+                    industry_text = " ".join(co.get("industries", []))
+                    if not is_consumer_company(industry_text, desc):
+                        skipped += 1
                         continue
-                    if text.lower() in (
-                        "home", "about", "contact", "blog", "apply",
-                        "sign up", "log in", "privacy", "terms",
-                    ):
-                        continue
 
-                    parent = await link.evaluate_handle("el => el.parentElement")
-                    parent_text = await parent.evaluate("el => el.innerText || ''")
-                    parent_text = parent_text.strip()
+                # Extract founder names
+                founders = []
+                for f in co.get("founder_set", []):
+                    first = f.get("first_name", "")
+                    last = f.get("last_name", "")
+                    if first or last:
+                        founders.append(f"{first} {last}".strip())
 
-                    if text in seen_names:
-                        continue
+                # Extract founder LinkedIn URLs
+                linkedin_urls = []
+                for f in co.get("founder_set", []):
+                    li = f.get("linkedin_url", "")
+                    if li:
+                        linkedin_urls.append(li)
 
-                    if href.startswith("http") and "a16z" not in href:
-                        desc_lines = [
-                            l.strip()
-                            for l in parent_text.split("\n")
-                            if l.strip() and l.strip() != text
-                        ]
-                        description = desc_lines[0][:500] if desc_lines else ""
+                cohort = co.get("cohort", "")
+                founded_year = co.get("founded_year")
+                if founded_year and founded_year < self.cutoff_year:
+                    continue
 
-                        # B2C filter
-                        if not is_consumer_company(parent_text, description):
-                            skipped += 1
-                            continue
-
-                        seen_names.add(text)
-                        companies.append(
-                            {
-                                "name": text,
-                                "description": description,
-                                "website": href,
-                                "founders": "",
-                                "linkedin_url": "",
-                                "accelerator": "a16z Speedrun",
-                                "batch": "",
-                                "founded_year": None,
-                                "tags": "Consumer",
-                                "logo_url": "",
-                            }
-                        )
-                except Exception as e:
-                    errors.append(str(e))
-
-            if not companies:
-                for card in cards:
-                    try:
-                        text = await card.inner_text()
-                        lines = [l.strip() for l in text.split("\n") if l.strip()]
-                        if not lines:
-                            continue
-
-                        name = lines[0]
-                        if name in seen_names or len(name) > 100:
-                            continue
-
-                        description = lines[1] if len(lines) > 1 else ""
-                        link_el = await card.query_selector("a[href]")
-                        website = ""
-                        if link_el:
-                            website = await link_el.get_attribute("href") or ""
-
-                        if not is_consumer_company(text, description):
-                            skipped += 1
-                            continue
-
-                        seen_names.add(name)
-                        companies.append(
-                            {
-                                "name": name,
-                                "description": description[:500],
-                                "website": website,
-                                "founders": "",
-                                "linkedin_url": "",
-                                "accelerator": "a16z Speedrun",
-                                "batch": "",
-                                "founded_year": None,
-                                "tags": "Consumer",
-                                "logo_url": "",
-                            }
-                        )
-                    except Exception as e:
-                        errors.append(str(e))
+                companies.append(
+                    {
+                        "name": name,
+                        "description": (co.get("preamble", "") or "").strip()[:500],
+                        "website": co.get("website_url", "") or "",
+                        "founders": ", ".join(founders),
+                        "linkedin_url": "; ".join(linkedin_urls),
+                        "accelerator": "a16z Speedrun",
+                        "batch": cohort,
+                        "founded_year": founded_year,
+                        "tags": ", ".join(co.get("industries", [])),
+                        "logo_url": co.get("logo", "") or "",
+                    }
+                )
 
         except Exception as e:
-            errors.append(str(e))
             logger.error(f"a16z scrape error: {e}")
         finally:
             await browser.close()
