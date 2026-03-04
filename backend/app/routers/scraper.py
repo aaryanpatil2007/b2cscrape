@@ -7,6 +7,12 @@ from app.database import get_db
 from app.models import Company
 from app.schemas import ScrapeRequest, ScrapeResult
 from app.scrapers.a16z import A16ZScraper
+from app.scrapers.competitors.archive import ArchiveScraper
+from app.scrapers.competitors.aspire import AspireScraper
+from app.scrapers.competitors.bazaarvoice import BazaarvoiceScraper
+from app.scrapers.competitors.grin import GRINScraper
+from app.scrapers.competitors.hashtagpaid import HashtagPaidScraper
+from app.scrapers.competitors.nosto import NostoScraper
 from app.scrapers.pearx import PearXScraper
 from app.scrapers.yc import YCScraper
 
@@ -18,6 +24,12 @@ SCRAPER_MAP = {
     "yc": YCScraper,
     "a16z": A16ZScraper,
     "pearx": PearXScraper,
+    "grin": GRINScraper,
+    "bazaarvoice": BazaarvoiceScraper,
+    "aspire": AspireScraper,
+    "hashtagpaid": HashtagPaidScraper,
+    "nosto": NostoScraper,
+    "archive": ArchiveScraper,
 }
 
 

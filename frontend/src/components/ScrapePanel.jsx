@@ -8,10 +8,19 @@ import {
 } from "lucide-react";
 import { runScrape } from "../api/client";
 
-const SOURCES = [
+const ACCELERATOR_SOURCES = [
   { key: "yc", label: "Y Combinator" },
   { key: "a16z", label: "a16z Speedrun" },
   { key: "pearx", label: "PearX" },
+];
+
+const COMPETITOR_SOURCES = [
+  { key: "grin", label: "GRIN" },
+  { key: "bazaarvoice", label: "Bazaarvoice" },
+  { key: "aspire", label: "Aspire" },
+  { key: "hashtagpaid", label: "#paid" },
+  { key: "nosto", label: "Nosto" },
+  { key: "archive", label: "Archive" },
 ];
 
 const YEAR_OPTIONS = [
@@ -81,9 +90,27 @@ export default function ScrapePanel({ onComplete }) {
         <div className="space-y-4 mb-4">
           {/* Source selection */}
           <div>
-            <label className="text-sm text-gray-400 mb-2 block">Sources</label>
+            <label className="text-sm text-gray-400 mb-2 block">Accelerators</label>
             <div className="flex flex-wrap gap-2">
-              {SOURCES.map((s) => (
+              {ACCELERATOR_SOURCES.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => toggleSource(s.key)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    selectedSources.includes(s.key)
+                      ? "bg-violet-600 text-white"
+                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-sm text-gray-400 mb-2 block">Competitors</label>
+            <div className="flex flex-wrap gap-2">
+              {COMPETITOR_SOURCES.map((s) => (
                 <button
                   key={s.key}
                   onClick={() => toggleSource(s.key)}

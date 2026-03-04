@@ -29,7 +29,7 @@ export default function FilterBar({ filters, activeFilters, onChange }) {
             onChange={(e) => update("accelerator", e.target.value)}
             className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-violet-500 focus:border-violet-500 outline-none"
           >
-            <option value="">All Accelerators</option>
+            <option value="">All Sources</option>
             {filters.accelerators.map((a) => (
               <option key={a} value={a}>
                 {a}
