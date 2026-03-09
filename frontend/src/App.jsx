@@ -4,7 +4,8 @@ import ScrapePanel from "./components/ScrapePanel";
 import FilterBar from "./components/FilterBar";
 import CompanyTable from "./components/CompanyTable";
 import NotesModal from "./components/NotesModal";
-import { getCompanies, getFilters, updateCompany } from "./api/client";
+import EmailModal from "./components/EmailModal";
+import { getCompanies, getFilters, updateCompany, enrichAllEmails } from "./api/client";
 
 export default function App() {
   const [companies, setCompanies] = useState([]);
@@ -17,6 +18,8 @@ export default function App() {
   });
   const [loading, setLoading] = useState(false);
   const [notesModal, setNotesModal] = useState(null);
+  const [emailModal, setEmailModal] = useState(null);
+  const [enriching, setEnriching] = useState(false);
 
   const fetchCompanies = useCallback(async () => {
     setLoading(true);
@@ -76,6 +79,39 @@ export default function App() {
     }
   };
 
+  const handleCompanyUpdate = (companyId, updates) => {
+    setCompanies((prev) =>
+      prev.map((c) => (c.id === companyId ? { ...c, ...updates } : c))
+    );
+  };
+
+  const handleEmailSent = (companyId) => {
+    setCompanies((prev) =>
+      prev.map((c) =>
+        c.id === companyId ? { ...c, outreach_done: true } : c
+      )
+    );
+  };
+
+  const handleEnrichAll = async () => {
+    setEnriching(true);
+    try {
+      const results = await enrichAllEmails();
+      for (const r of results) {
+        if (r.email) {
+          handleCompanyUpdate(r.company_id, {
+            founder_email: r.email,
+            email_verified: r.verified,
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Enrich all failed:", e);
+    } finally {
+      setEnriching(false);
+    }
+  };
+
   const handleScrapeComplete = () => {
     fetchCompanies();
     fetchFilters();
@@ -97,8 +133,17 @@ export default function App() {
               </p>
             </div>
           </div>
-          <div className="text-sm text-gray-400">
-            {companies.length} companies loaded
+          <div className="flex items-center gap-4">
+            <button
+              onClick={handleEnrichAll}
+              disabled={enriching || companies.length === 0}
+              className="text-sm px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {enriching ? "Enriching..." : "Enrich All Emails"}
+            </button>
+            <div className="text-sm text-gray-400">
+              {companies.length} companies loaded
+            </div>
           </div>
         </div>
       </header>
@@ -115,6 +160,8 @@ export default function App() {
           loading={loading}
           onToggleOutreach={handleToggleOutreach}
           onOpenNotes={setNotesModal}
+          onOpenEmail={setEmailModal}
+          onCompanyUpdate={handleCompanyUpdate}
         />
       </main>
 
@@ -123,6 +170,14 @@ export default function App() {
           company={notesModal}
           onSave={handleSaveNotes}
           onClose={() => setNotesModal(null)}
+        />
+      )}
+
+      {emailModal && (
+        <EmailModal
+          company={emailModal}
+          onSent={handleEmailSent}
+          onClose={() => setEmailModal(null)}
         />
       )}
     </div>

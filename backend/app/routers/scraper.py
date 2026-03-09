@@ -1,10 +1,18 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.config import settings
+from app.database import SessionLocal, get_db
 from app.models import Company
+from app.routers.companies import (
+    _extract_domain,
+    _hunter_domain_search,
+    _hunter_find_email,
+    _hunter_verify_email,
+)
 from app.schemas import ScrapeRequest, ScrapeResult
 from app.scrapers.a16z import A16ZScraper
 from app.scrapers.competitors.archive import ArchiveScraper
@@ -32,6 +40,27 @@ SCRAPER_MAP = {
     "archive": ArchiveScraper,
 }
 
+# Domains that are NOT real company websites
+BAD_DOMAINS = [
+    "ycombinator.com",
+    "startupschool.org",
+    "bookface.ycombinator.com",
+]
+
+
+def _has_bad_email(company: Company) -> bool:
+    """Check if a company has no email or a wrong one (e.g. YC partner)."""
+    if not company.founder_email:
+        return True
+    return any(d in company.founder_email for d in BAD_DOMAINS)
+
+
+def _has_bad_website(website: str) -> bool:
+    """Check if a website URL points to YC instead of the real company."""
+    if not website:
+        return True
+    return any(d in website for d in BAD_DOMAINS)
+
 
 def _upsert_companies(db: Session, companies: list[dict]) -> tuple[int, int]:
     new_count = 0
@@ -54,11 +83,30 @@ def _upsert_companies(db: Session, companies: list[dict]) -> tuple[int, int]:
             .first()
         )
         if exists:
+            # Update website/founders and clear bad emails
+            updated = False
+            if data.get("website") and (
+                _has_bad_website(exists.website)
+            ):
+                exists.website = data["website"]
+                updated = True
+            if data.get("founders") and not exists.founders:
+                exists.founders = data["founders"]
+                updated = True
+            if data.get("linkedin_url") and not exists.linkedin_url:
+                exists.linkedin_url = data["linkedin_url"]
+                updated = True
+            # Clear bad emails so they get re-enriched
+            if _has_bad_email(exists) and updated:
+                exists.founder_email = ""
+                exists.email_verified = False
+            if updated:
+                db.flush()
             skip_count += 1
             continue
 
         try:
-            sp = db.begin_nested()  # savepoint so failure doesn't nuke batch
+            sp = db.begin_nested()
             company = Company(**data)
             db.add(company)
             db.flush()
@@ -69,6 +117,49 @@ def _upsert_companies(db: Session, companies: list[dict]) -> tuple[int, int]:
 
     db.commit()
     return new_count, skip_count
+
+
+async def _enrich_email(company: Company) -> None:
+    """Find and verify email for a single company via Hunter.io."""
+    domain = _extract_domain(company.website)
+    if not domain or any(d in domain for d in BAD_DOMAINS):
+        return
+
+    email = ""
+
+    # Strategy 1: email-finder with founder name
+    if company.founders:
+        first_founder = company.founders.split(",")[0].strip()
+        parts = first_founder.split()
+        if len(parts) >= 2:
+            try:
+                result = await _hunter_find_email(domain, parts[0], parts[-1])
+                email = result.get("email", "")
+            except Exception as e:
+                logger.debug(f"Hunter email-finder failed for {domain}: {e}")
+
+    # Strategy 2: domain search
+    if not email:
+        try:
+            emails = await _hunter_domain_search(domain)
+            if emails:
+                email = emails[0].get("value", "")
+        except Exception as e:
+            logger.debug(f"Hunter domain-search failed for {domain}: {e}")
+
+    if not email:
+        return
+
+    # Verify
+    verified = False
+    try:
+        verification = await _hunter_verify_email(email)
+        verified = verification.get("result") == "deliverable"
+    except Exception as e:
+        logger.debug(f"Hunter verify failed for {email}: {e}")
+
+    company.founder_email = email
+    company.email_verified = verified
 
 
 @router.post("/", response_model=list[ScrapeResult])
@@ -110,4 +201,41 @@ async def run_scrape(req: ScrapeRequest, db: Session = Depends(get_db)):
             )
         )
 
+    # Auto-enrich emails in the background (if Hunter key is set)
+    if settings.hunter_api_key:
+        asyncio.create_task(_background_enrich())
+
     return results
+
+
+async def _background_enrich():
+    """Enrich emails for all companies missing them, in a separate DB session."""
+    db = SessionLocal()
+    try:
+        to_enrich = (
+            db.query(Company)
+            .filter(
+                (Company.founder_email == "")
+                | (Company.founder_email.contains("ycombinator.com"))
+            )
+            .filter(Company.website != "")
+            .all()
+        )
+        enriched = 0
+        for company in to_enrich:
+            if _has_bad_website(company.website):
+                continue
+            try:
+                await _enrich_email(company)
+                enriched += 1
+                # Commit in batches of 5 so results appear progressively
+                if enriched % 5 == 0:
+                    db.commit()
+            except Exception as e:
+                logger.debug(f"Enrich failed for {company.name}: {e}")
+        db.commit()
+        logger.info(f"Background enrichment done: {enriched} companies enriched")
+    except Exception as e:
+        logger.error(f"Background enrichment error: {e}")
+    finally:
+        db.close()

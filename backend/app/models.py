@@ -29,6 +29,8 @@ class Company(Base):
     founded_year = Column(Integer, nullable=True)
     tags = Column(Text, default="")
     logo_url = Column(String(1024), default="")
+    founder_email = Column(String(512), default="")
+    email_verified = Column(Boolean, default=False)
     outreach_done = Column(Boolean, default=False)
     notes = Column(Text, default="")
     scraped_at = Column(DateTime, default=datetime.datetime.utcnow)

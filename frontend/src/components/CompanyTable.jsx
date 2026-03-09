@@ -1,18 +1,49 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   ExternalLink,
   Linkedin,
   StickyNote,
   Loader2,
   Building2,
+  Mail,
+  Search,
+  Send,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
+import { enrichCompanyEmail } from "../api/client";
 
 export default function CompanyTable({
   companies,
   loading,
   onToggleOutreach,
   onOpenNotes,
+  onOpenEmail,
+  onCompanyUpdate,
 }) {
+  const [enrichingIds, setEnrichingIds] = useState(new Set());
+
+  const handleEnrich = async (company) => {
+    setEnrichingIds((prev) => new Set([...prev, company.id]));
+    try {
+      const result = await enrichCompanyEmail(company.id);
+      if (result.email) {
+        onCompanyUpdate(company.id, {
+          founder_email: result.email,
+          email_verified: result.verified,
+        });
+      }
+    } catch (e) {
+      console.error("Enrich failed:", e);
+    } finally {
+      setEnrichingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(company.id);
+        return next;
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-gray-400">
@@ -49,6 +80,7 @@ export default function CompanyTable({
               </th>
               <th className="px-4 py-3 text-gray-400 font-medium">Source</th>
               <th className="px-4 py-3 text-gray-400 font-medium">Batch</th>
+              <th className="px-4 py-3 text-gray-400 font-medium">Email</th>
               <th className="px-4 py-3 text-gray-400 font-medium">Links</th>
               <th className="px-4 py-3 text-gray-400 font-medium w-10">
                 <span className="sr-only">Notes</span>
@@ -125,6 +157,45 @@ export default function CompanyTable({
 
                 {/* Batch */}
                 <td className="px-4 py-3 text-gray-400">{c.batch || "-"}</td>
+
+                {/* Email */}
+                <td className="px-4 py-3">
+                  {c.founder_email ? (
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 min-w-0">
+                        {c.email_verified ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" title="Verified" />
+                        ) : (
+                          <XCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" title="Unverified" />
+                        )}
+                        <span className="text-gray-300 text-xs truncate max-w-[140px]" title={c.founder_email}>
+                          {c.founder_email}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => onOpenEmail(c)}
+                        className="text-violet-400 hover:text-violet-300 transition-colors shrink-0"
+                        title="Send email"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleEnrich(c)}
+                      disabled={enrichingIds.has(c.id)}
+                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-violet-400 transition-colors disabled:opacity-50"
+                      title="Find email via Hunter.io"
+                    >
+                      {enrichingIds.has(c.id) ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Search className="w-3.5 h-3.5" />
+                      )}
+                      <span>{enrichingIds.has(c.id) ? "Finding..." : "Find email"}</span>
+                    </button>
+                  )}
+                </td>
 
                 {/* Links */}
                 <td className="px-4 py-3">

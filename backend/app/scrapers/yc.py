@@ -23,6 +23,98 @@ def _parse_batch_year(batch: str) -> int | None:
 class YCScraper(BaseScraper):
     source_name = "YC"
 
+    async def _scrape_company_detail(self, context, href: str) -> dict:
+        """Open a company detail page to extract website and founder names."""
+        detail = {"website": "", "founders": "", "linkedin_url": ""}
+        page = await context.new_page()
+        try:
+            url = f"https://www.ycombinator.com{href}"
+            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            await page.wait_for_timeout(1500)
+
+            # Domains to skip when looking for the company website
+            SKIP_DOMAINS = [
+                "ycombinator.com",
+                "startupschool.org",
+                "bookface.ycombinator.com",
+                "news.ycombinator.com",
+                "account.ycombinator.com",
+                "linkedin.com",
+                "twitter.com",
+                "x.com",
+                "facebook.com",
+                "crunchbase.com",
+                "github.com",
+            ]
+
+            # Strategy 1: Look for link whose visible text IS the domain
+            # (e.g. "resonate.audio" displayed as link text)
+            links = await page.query_selector_all("a[href^='http']")
+            for link in links:
+                link_href = await link.get_attribute("href") or ""
+                try:
+                    link_text = (await link.inner_text()).strip().lower()
+                except Exception:
+                    continue
+
+                # Collect LinkedIn URL
+                if "linkedin.com" in link_href and not detail["linkedin_url"]:
+                    detail["linkedin_url"] = link_href
+
+                if any(d in link_href for d in SKIP_DOMAINS):
+                    continue
+
+                # If link text looks like a domain (e.g. "resonate.audio")
+                if re.match(r"^[a-z0-9][\w.-]+\.[a-z]{2,}$", link_text):
+                    detail["website"] = link_href
+                    break
+
+            # Strategy 2: If not found, look for links in the main content area
+            # (skip the first ~28 nav links)
+            if not detail["website"]:
+                all_links = await page.query_selector_all("a[href^='http']")
+                for link in all_links[25:]:  # Skip header/nav links
+                    link_href = await link.get_attribute("href") or ""
+                    if any(d in link_href for d in SKIP_DOMAINS):
+                        continue
+                    detail["website"] = link_href
+                    break
+
+            # Founder names — look for "Active Founders" or "Founders" section
+            page_text = await page.inner_text("body")
+            founder_names = []
+
+            founders_match = re.search(
+                r"(?:Active\s+)?Founders?\s*\n((?:[^\n]+\n){1,10})",
+                page_text,
+                re.IGNORECASE,
+            )
+            if founders_match:
+                block = founders_match.group(1)
+                for line in block.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Founder names are typically short (2-4 words, capitalized)
+                    if (
+                        re.match(r"^[A-Z][a-z]+ [A-Z]", line)
+                        and len(line.split()) <= 5
+                        and len(line) < 50
+                    ):
+                        founder_names.append(line)
+                    else:
+                        if founder_names:
+                            break
+
+            detail["founders"] = ", ".join(founder_names)
+
+        except Exception as e:
+            logger.debug(f"YC detail scrape failed for {href}: {e}")
+        finally:
+            await page.close()
+
+        return detail
+
     async def scrape(self) -> list[dict]:
         pw, browser, context, page = await self._launch_browser()
         companies = []
@@ -50,6 +142,8 @@ class YCScraper(BaseScraper):
             cards = await page.query_selector_all("a[href^='/companies/']")
             seen_hrefs = set()
 
+            # First pass: collect card-level data and filter
+            card_data = []
             for card in cards:
                 try:
                     href = await card.get_attribute("href")
@@ -127,14 +221,11 @@ class YCScraper(BaseScraper):
                     img_el = await card.query_selector("img")
                     logo = await img_el.get_attribute("src") if img_el else ""
 
-                    companies.append(
+                    card_data.append(
                         {
+                            "href": href,
                             "name": name.strip(),
                             "description": description.strip(),
-                            "website": f"https://www.ycombinator.com{href}",
-                            "founders": "",
-                            "linkedin_url": "",
-                            "accelerator": "YC",
                             "batch": batch.strip(),
                             "founded_year": founded_year,
                             "tags": category_tag or "Consumer",
@@ -144,6 +235,30 @@ class YCScraper(BaseScraper):
                 except Exception as e:
                     errors.append(str(e))
                     logger.warning(f"YC card parse error: {e}")
+
+            # Second pass: visit each company detail page for website + founders
+            logger.info(
+                f"YC: Scraping detail pages for {len(card_data)} B2C companies..."
+            )
+            for i, data in enumerate(card_data):
+                detail = await self._scrape_company_detail(context, data["href"])
+                companies.append(
+                    {
+                        "name": data["name"],
+                        "description": data["description"],
+                        "website": detail["website"]
+                        or f"https://www.ycombinator.com{data['href']}",
+                        "founders": detail["founders"],
+                        "linkedin_url": detail["linkedin_url"],
+                        "accelerator": "YC",
+                        "batch": data["batch"],
+                        "founded_year": data["founded_year"],
+                        "tags": data["tags"],
+                        "logo_url": data["logo_url"],
+                    }
+                )
+                if (i + 1) % 10 == 0:
+                    logger.info(f"YC: Scraped {i + 1}/{len(card_data)} detail pages")
 
         except Exception as e:
             errors.append(str(e))

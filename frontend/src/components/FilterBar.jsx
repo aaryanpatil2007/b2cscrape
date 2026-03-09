@@ -14,7 +14,7 @@ export default function FilterBar({ filters, activeFilters, onChange }) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
           <input
             type="text"
-            placeholder="Search companies..."
+            placeholder="Search (e.g. yc s24, a16z, fintech)..."
             value={activeFilters.search}
             onChange={(e) => update("search", e.target.value)}
             className="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-violet-500 focus:border-violet-500 outline-none placeholder-gray-500"

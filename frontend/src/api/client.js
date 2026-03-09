@@ -49,3 +49,18 @@ export function addOutreachLog(data) {
     body: JSON.stringify(data),
   });
 }
+
+export function enrichCompanyEmail(companyId) {
+  return request(`/companies/${companyId}/enrich`, { method: "POST" });
+}
+
+export function enrichAllEmails() {
+  return request("/companies/enrich-all", { method: "POST" });
+}
+
+export function sendEmail(companyId, data) {
+  return request(`/companies/${companyId}/send-email`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
