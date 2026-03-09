@@ -47,12 +47,46 @@ BAD_DOMAINS = [
     "bookface.ycombinator.com",
 ]
 
+# Email domains to reject — these are social/generic, not founder emails
+JUNK_EMAIL_DOMAINS = {
+    "youtube.com",
+    "instagram.com",
+    "facebook.com",
+    "twitter.com",
+    "x.com",
+    "tiktok.com",
+    "linkedin.com",
+    "pinterest.com",
+    "snapchat.com",
+    "reddit.com",
+    "medium.com",
+    "github.com",
+    "apple.com",
+    "google.com",
+    "gmail.com",
+    "yahoo.com",
+    "hotmail.com",
+    "outlook.com",
+    "aol.com",
+    "ycombinator.com",
+    "startupschool.org",
+    "example.com",
+}
+
+
+def _is_junk_email(email: str) -> bool:
+    """Check if email is from a social/generic domain."""
+    if not email or "@" not in email:
+        return True
+    domain = email.split("@")[1].lower()
+    return domain in JUNK_EMAIL_DOMAINS
+
 
 def _has_bad_email(company: Company) -> bool:
-    """Check if a company has no email or a wrong one (e.g. YC partner)."""
+    """Check if a company has no email or a wrong one (e.g. YC partner, social)."""
     if not company.founder_email:
         return True
-    return any(d in company.founder_email for d in BAD_DOMAINS)
+    return _is_junk_email(company.founder_email)
 
 
 def _has_bad_website(website: str) -> bool:
@@ -134,16 +168,21 @@ async def _enrich_email(company: Company) -> None:
         if len(parts) >= 2:
             try:
                 result = await _hunter_find_email(domain, parts[0], parts[-1])
-                email = result.get("email", "")
+                candidate = result.get("email", "")
+                if candidate and not _is_junk_email(candidate):
+                    email = candidate
             except Exception as e:
                 logger.debug(f"Hunter email-finder failed for {domain}: {e}")
 
-    # Strategy 2: domain search
+    # Strategy 2: domain search — pick first non-junk email
     if not email:
         try:
             emails = await _hunter_domain_search(domain)
-            if emails:
-                email = emails[0].get("value", "")
+            for entry in emails:
+                candidate = entry.get("value", "")
+                if candidate and not _is_junk_email(candidate):
+                    email = candidate
+                    break
         except Exception as e:
             logger.debug(f"Hunter domain-search failed for {domain}: {e}")
 

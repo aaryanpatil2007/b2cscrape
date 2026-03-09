@@ -24,6 +24,24 @@ from app.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# Email domains to reject — social/generic, not founder emails
+JUNK_EMAIL_DOMAINS = {
+    "youtube.com", "instagram.com", "facebook.com", "twitter.com", "x.com",
+    "tiktok.com", "linkedin.com", "pinterest.com", "snapchat.com", "reddit.com",
+    "medium.com", "github.com", "apple.com", "google.com", "gmail.com",
+    "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "ycombinator.com",
+    "startupschool.org", "example.com",
+}
+
+
+def _is_junk_email(email: str) -> bool:
+    """Check if email is from a social/generic domain."""
+    if not email or "@" not in email:
+        return True
+    domain = email.split("@")[1].lower()
+    return domain in JUNK_EMAIL_DOMAINS
+
+
 router = APIRouter(prefix="/api/companies", tags=["companies"])
 
 # Aliases so users can type "yc" or "y combinator" etc.
@@ -291,17 +309,21 @@ async def enrich_company_email(company_id: int, db: Session = Depends(get_db)):
             first_name, last_name = parts[0], parts[-1]
             try:
                 result = await _hunter_find_email(domain, first_name, last_name)
-                email = result.get("email", "")
+                candidate = result.get("email", "")
+                if candidate and not _is_junk_email(candidate):
+                    email = candidate
             except Exception as e:
                 logger.warning(f"Hunter email-finder failed for {domain}: {e}")
 
-    # Strategy 2: Fall back to domain search
+    # Strategy 2: Fall back to domain search — pick first non-junk
     if not email:
         try:
             emails = await _hunter_domain_search(domain)
-            if emails:
-                # Pick the first email (Hunter returns most relevant first)
-                email = emails[0].get("value", "")
+            for entry in emails:
+                candidate = entry.get("value", "")
+                if candidate and not _is_junk_email(candidate):
+                    email = candidate
+                    break
         except Exception as e:
             logger.warning(f"Hunter domain-search failed for {domain}: {e}")
 

@@ -64,3 +64,10 @@ export function sendEmail(companyId, data) {
     body: JSON.stringify(data),
   });
 }
+
+export function searchAccelerator(query) {
+  return request("/search/", {
+    method: "POST",
+    body: JSON.stringify({ query }),
+  });
+}

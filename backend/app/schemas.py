@@ -77,3 +77,20 @@ class ScrapeResult(BaseModel):
     new_companies: int
     skipped_duplicates: int
     errors: list[str] = []
+
+
+class SearchRequest(BaseModel):
+    query: str  # e.g. "a16z 2025", "yc s24 fintech"
+
+
+class SearchCompany(BaseModel):
+    name: str
+    description: str = ""
+    website: str = ""
+    founders: str = ""
+    batch: str = ""
+    tags: str = ""
+    logo_url: str = ""
+    source_url: str = ""
+    founder_email: str = ""
+    email_verified: bool = False

@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
-from app.routers import companies, scraper
+from app.routers import companies, scraper, search
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,6 +20,7 @@ app.add_middleware(
 
 app.include_router(companies.router)
 app.include_router(scraper.router)
+app.include_router(search.router)
 
 
 @app.on_event("startup")

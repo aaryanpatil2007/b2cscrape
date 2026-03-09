@@ -34,17 +34,15 @@ class YCScraper(BaseScraper):
 
             # Domains to skip when looking for the company website
             SKIP_DOMAINS = [
-                "ycombinator.com",
-                "startupschool.org",
-                "bookface.ycombinator.com",
-                "news.ycombinator.com",
+                "ycombinator.com", "startupschool.org",
+                "bookface.ycombinator.com", "news.ycombinator.com",
                 "account.ycombinator.com",
-                "linkedin.com",
-                "twitter.com",
-                "x.com",
-                "facebook.com",
-                "crunchbase.com",
-                "github.com",
+                "linkedin.com", "twitter.com", "x.com",
+                "facebook.com", "crunchbase.com", "github.com",
+                "instagram.com", "youtube.com", "tiktok.com",
+                "pinterest.com", "snapchat.com", "reddit.com",
+                "medium.com", "discord.gg", "discord.com",
+                "apps.apple.com", "play.google.com",
             ]
 
             # Strategy 1: Look for link whose visible text IS the domain
